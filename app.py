@@ -143,46 +143,36 @@ if st.button("🚀 Ejecutar Barrido de Información"):
             st.success("✅ ¡No se detectaron cambios! Toda la información coincide perfectamente.")
         else:
             st.warning("⚠️ Se detectaron discrepancias localizadas. Analizando cambios específicos:")
-            
-            html_resultado = []
+            st.write("### 🔍 Mapeo de Actualizaciones In-Place")
             
             for numeral in todos_los_numerales:
                 en_base = numeral in dicc_base
                 en_nuevo = numeral in dicc_nuevo
                 
+                # Caso 1: Modificación o cambio dentro del mismo numeral
                 if en_base and en_nuevo:
                     txt_b = dicc_base[numeral]
                     txt_n = dicc_nuevo[numeral]
                     
                     if txt_b != txt_n:
-                        html_resultado.append(f"""
-                        <div style='background-color: #fff9e6; padding: 12px; margin: 10px 0; border-left: 6px solid #ffcc00; border-radius: 4px; font-family: sans-serif;'>
-                            <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Correspondiente: {numeral}</span>
-                            <div style='margin-top: 8px; color: #cc0000;'><b>🛑 ANTES (Desactualizado):</b><br>{txt_b}</div>
-                            <div style='margin-top: 6px; color: #2e7d32;'><b>🟢 AHORA (Actualizado):</b><br>{txt_n}</div>
-                        </div>
-                        """)
+                        with st.container():
+                            st.info(f"**📍 Numeral Correspondiente: {numeral}**")
+                            st.markdown(f"🔴 **ANTES (Desactualizado):** \n{txt_b}")
+                            st.markdown(f"🟢 **AHORA (Actualizado):** \n{txt_n}")
+                            st.write("---")
                 
+                # Caso 2: El numeral fue eliminado por completo
                 elif en_base and not en_nuevo:
-                    html_resultado.append(f"""
-                    <div style='background-color: #ffeeef; padding: 12px; margin: 10px 0; border-left: 6px solid #d32f2f; border-radius: 4px; font-family: sans-serif;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Eliminado: {numeral}</span>
-                        <div style='margin-top: 8px; color: #d32f2f;'><b>🗑️ REMOVIDO COMPLETAMENTE DE LA FUENTE NUEVA:</b><br>{dicc_base[numeral]}</div>
-                    </div>
-                    """)
+                    with st.container():
+                        st.error(f"**📍 Numeral Eliminado de la Nueva Fuente: {numeral}**")
+                        st.markdown(f"🗑️ **CONTENIDO REMOVIDO:** \n{dicc_base[numeral]}")
+                        st.write("---")
                 
+                # Caso 3: Es un numeral totalmente nuevo
                 elif not en_base and en_nuevo:
-                    html_resultado.append(f"""
-                    <div style='background-color: #edf7ed; padding: 12px; margin: 10px 0; border-left: 6px solid #388e3c; border-radius: 4px; font-family: sans-serif;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Nuevo Detectado: {numeral}</span>
-                        <div style='margin-top: 8px; color: #388e3c;'><b>✨ NUEVA SECCIÓN ADICIONADA:</b><br>{dicc_nuevo[numeral]}</div>
-                    </div>
-                    """)
-            
-            # RENDERIZADO VISUAL SEGURO
-            if html_resultado:
-                st.markdown("".join(html_resultado), unsafe_allow_html=True)
-            else:
-                st.info("No hay cambios que mostrar.")
+                    with st.container():
+                        st.success(f"**📍 Numeral Nuevo Detectado: {numeral}**")
+                        st.markdown(f"✨ **NUEVA SECCIÓN ADICIONADA:** \n{dicc_nuevo[numeral]}")
+                        st.write("---")
     else:
         st.info("💡 Asegúrate de llenar el texto base y proveer la nueva fuente antes de ejecutar el barrido.")
