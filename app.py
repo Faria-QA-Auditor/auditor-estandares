@@ -24,7 +24,6 @@ def extraer_texto_pdf(file):
 def extraer_texto_excel(file):
     texto_completo = []
     df = pd.read_excel(file)
-    # Convertir cada fila relevante en una cadena de texto para comparar
     for index, fila in df.iterrows():
         fila_str = " | ".join([f"{col}: {val}" for col, val in fila.items() if pd.notna(val)])
         texto_completo.append(f"[Fila {index+2}] {fila_str}")
@@ -40,7 +39,6 @@ with col1:
         height=300,
         placeholder="Copia y pega las líneas o párrafos que tienes registrados actualmente..."
     )
-    # Dividir el texto ingresado en líneas limpias
     lineas_base = [linea.strip() for linea in texto_base_raw.split('\n') if linea.strip()]
 
 with col2:
@@ -51,4 +49,43 @@ with col2:
 # --- PROCESAMIENTO Y COMPARACIÓN ---
 if st.button("🚀 Ejecutar Barrido de Información") and lineas_base and archivo_subido:
     
-    # Extraer texto según
+    # Extraer texto según el archivo elegido
+    if tipo_archivo == "PDF":
+        lineas_nuevas = extraer_texto_pdf(archivo_subido)
+    else:
+        lineas_nuevas = extraer_texto_excel(archivo_subido)
+        
+    # Calcular similitud general
+    texto_base_unido = " ".join(lineas_base)
+    texto_nuevo_unido = " ".join(lineas_nuevas)
+    similitud = difflib.SequenceMatcher(None, texto_base_unido, texto_nuevo_unido).ratio() * 100
+    
+    st.subheader("📊 Diagnóstico del Barrido")
+    st.metric(label="Porcentaje de Coincidencia Global", value=f"{similitud:.2f}%")
+    
+    if similitud == 100:
+        st.success("✅ ¡No se detectaron cambios! El archivo coincide exactamente con tu base de datos.")
+    else:
+        st.warning("⚠️ Se detectaron discrepancias. Revisa los cambios detallados abajo:")
+        
+        # Comparación línea por línea
+        diferenciador = difflib.Differ()
+        resultado_diff = list(diferenciador.compare(lineas_base, lineas_nuevas))
+        
+        st.write("### 🔍 Reporte Detallado de Cambios")
+        st.caption("Leyenda: Las líneas sin cambios aparecen normal. Los textos eliminados de tu base o modificados se muestran abajo.")
+        
+        html_resultado = []
+        
+        for linea in resultado_diff:
+            if linea.startswith("- "):
+                html_resultado.append(f"<div style='background-color: #ffcccc; color: #cc0000; padding: 5px; margin: 2px 0; border-left: 5px solid #cc0000;'>❌ <b>Eliminado/Modificado en Origen:</b> <del>{linea[2:]}</del></div>")
+            elif linea.startswith("+ "):
+                html_resultado.append(f"<div style='background-color: #e2f0d9; color: #385723; padding: 5px; margin: 2px 0; border-left: 5px solid #385723;'>➕ <b>Nuevo cambio detectado (In-place):</b> {linea[2:]}</div>")
+            elif linea.startswith("  "):
+                pass
+                
+        st.markdown("".join(html_resultado), unsafe_allow_html=True)
+else:
+    if not lineas_base or not archivo_subido:
+        st.info("💡 Para empezar, asegúrate de pegar el texto base a la izquierda y subir un archivo a la derecha.")
