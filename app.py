@@ -7,7 +7,7 @@ import difflib
 st.set_page_config(page_title="Auditor de Estándares", layout="wide")
 
 st.title("🔍 Auditor de Actualizaciones de Estándares")
-st.subtitle("Detecta cambios sutiles (in-place updates) en archivos PDF o Excel frente a tu base de datos.")
+st.subheader("Detecta cambios sutiles (in-place updates) en archivos PDF o Excel frente a tu base de datos.")
 
 # --- FUNCIONES DE EXTRACCIÓN ---
 def extraer_texto_pdf(file):
@@ -51,49 +51,4 @@ with col2:
 # --- PROCESAMIENTO Y COMPARACIÓN ---
 if st.button("🚀 Ejecutar Barrido de Información") and lineas_base and archivo_subido:
     
-    # Extraer texto según el archivo
-    if tipo_archivo == "PDF":
-        lineas_nuevas = extraer_texto_pdf(archivo_subido)
-    else:
-        lineas_nuevas = extraer_texto_excel(archivo_subido)
-        
-    # Calcular similitud general
-    texto_base_unido = " ".join(lineas_base)
-    texto_nuevo_unido = " ".join(lineas_nuevas)
-    similitud = difflib.SequenceMatcher(None, texto_base_unido, texto_nuevo_unido).ratio() * 100
-    
-    st.subheader("📊 Diagnóstico del Barrido")
-    st.metric(label="Porcentaje de Coincidencia Global", value=f"{similitud:.2f}%")
-    
-    if similitud == 100:
-        st.success("✅ ¡No se detectaron cambios! El archivo coincide exactamente con tu base de datos.")
-    else:
-        st.warning("⚠️ Se detectaron discrepancias. Revisa los cambios detallados abajo:")
-        
-        # Comparación línea por línea
-        diferenciador = difflib.Differ()
-        resultado_diff = list(diferenciador.compare(lineas_base, lineas_nuevas))
-        
-        st.write("### 🔍 Reporte Detallado de Cambios")
-        st.caption("Leyenda: Las líneas sin cambios aparecen normal. Los textos eliminados de tu base o modificados se muestran abajo.")
-        
-        html_resultado = []
-        
-        for linea in resultado_diff:
-            # Línea eliminada o cambiada en el original
-            if linea.startswith("- "):
-                html_resultado.append(f"<div style='background-color: #ffcccc; color: #cc0000; padding: 5px; margin: 2px 0; border-left: 5px solid #cc0000;'>❌ <b>Eliminado/Modificado en Origen:</b> <del>{linea[2:]}</del></div>")
-            # Línea nueva detectada en el barrido
-            elif linea.startswith("+ "):
-                html_resultado.append(f"<div style='background-color: #e2f0d9; color: #385723; padding: 5px; margin: 2px 0; border-left: 5px solid #385723;'>➕ <b>Nuevo cambio detectado (In-place):</b> {linea[2:]}</div>")
-            # Líneas que coinciden perfectamente (opcional mostrarlas o no, aquí las mostramos sutilmente)
-            elif linea.startswith("  "):
-                # Descomenta la línea de abajo si quieres ver también lo que coincide
-                # html_resultado.append(f"<div style='color: #666; padding: 2px; font-size: 0.9em;'>= {linea[2:]}</div>")
-                pass
-                
-        # Renderizar el HTML en Streamlit
-        st.markdown("".join(html_resultado), unsafe_allow_html=True)
-else:
-    if not lineas_base or not archivo_subido:
-        st.info("💡 Para empezar, asegúrate de pegar el texto base a la izquierda y subir un archivo a la derecha.")
+    # Extraer texto según
