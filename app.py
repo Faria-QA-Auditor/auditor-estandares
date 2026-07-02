@@ -126,4 +126,32 @@ if st.button("🚀 Ejecutar Barrido de Información"):
                     <div style='background-color: #fff9e6; padding: 10px; margin: 8px 0; border-left: 6px solid #ffcc00; border-radius: 4px;'>
                         <span style='background-color: #e6f2ff; color: #0044cc; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; font-weight: bold;'>📍 {ubicacion}</span>
                         <div style='margin-top: 5px; color: #cc0000;'><b>🛑 ANTES (Desactualizado):</b> <del>{txt_viejo}</del></div>
-                        <div style='margin-top: 2px; color: #2e7
+                        <div style='margin-top: 2px; color: #2e7d32;'><b>🟢 AHORA (Actualizado):</b> {txt_nuevo}</div>
+                    </div>
+                    """)
+                
+                # 'delete' significa que algo se borró por completo y no tiene contraparte nueva
+                elif tag == 'delete':
+                    ubicacion = lineas_base[i1].split("|||")[0] if "|||" in lineas_base[i1] else f"[Línea {i1+1}]"
+                    txt_del = " // ".join(limpias_base[i1:i2])
+                    html_resultado.append(f"""
+                    <div style='background-color: #ffeeef; padding: 10px; margin: 8px 0; border-left: 6px solid #d32f2f; border-radius: 4px;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; font-weight: bold;'>📍 {ubicacion}</span>
+                        <div style='margin-top: 5px; color: #d32f2f;'><b>🗑️ ELIMINADO POR COMPLETO:</b> <del>{txt_del}</del></div>
+                    </div>
+                    """)
+                
+                # 'insert' significa que es texto completamente nuevo inyectado en el archivo
+                elif tag == 'insert':
+                    ubicacion = lineas_nuevas[j1].split("|||")[0] if "|||" in lineas_nuevas[j1] else f"[Línea {j1+1}]"
+                    txt_ins = " // ".join(limpias_nuevas[j1:j2])
+                    html_resultado.append(f"""
+                    <div style='background-color: #edf7ed; padding: 10px; margin: 8px 0; border-left: 6px solid #388e3c; border-radius: 4px;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; font-weight: bold;'>📍 {ubicacion}</span>
+                        <div style='margin-top: 5px; color: #388e3c;'><b>✨ NUEVA ADICIÓN ENCONTRADA:</b> {txt_ins}</div>
+                    </div>
+                    """)
+            
+            st.markdown("".join(html_resultado), unsafe_allow_html=True)
+    else:
+        st.info("💡 Asegúrate de llenar el texto base y proveer la nueva fuente antes de ejecutar el barrido.")
