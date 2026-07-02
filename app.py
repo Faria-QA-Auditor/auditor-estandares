@@ -57,7 +57,6 @@ def extraer_texto_pdf(stream):
             texto_pag = pagina.extract_text()
             if texto_pag:
                 texto_completo.append(texto_pag)
-    # Unimos todo el PDF para mapear los numerales globalmente a lo largo de las páginas
     return mapear_por_numerales(" ".join(texto_completo), "[PDF]")
 
 def extraer_texto_excel(stream):
@@ -65,7 +64,6 @@ def extraer_texto_excel(stream):
     df = pd.read_excel(stream)
     for index, fila in df.iterrows():
         fila_str = " | ".join([f"{col}: {val}" for col, val in fila.items() if pd.notna(val)])
-        # Intentar extraer un numeral de la fila, si no, usar el número de fila
         match = re.search(r'(\(\d+\))', fila_str)
         clave = match.group(1) if match else f"[Fila {index+2}]"
         diccionario_secciones[clave] = fila_str
@@ -127,14 +125,13 @@ with col2:
                 dicc_nuevo = extraer_texto_excel(archivo_subido)
             procesar_fuente = True
 
-# --- PROCESAMIENTO Y COMPARACIÓN EN PARALELO ---
+# --- PROCESAMIENTO Y COMPARACIÓN ---
 if st.button("🚀 Ejecutar Barrido de Información"):
     if dicc_base and procesar_fuente and dicc_nuevo:
         
-        # Consolidar todas las claves/numerales únicos identificados en ambas fuentes
+        # Consolidar y ordenar las claves numéricas detectadas
         todos_los_numerales = sorted(list(set(dicc_base.keys()) | set(dicc_nuevo.keys())), key=lambda x: len(x))
         
-        # Calcular similitud global de los contenidos
         texto_base_unido = " ".join(dicc_base.values())
         texto_nuevo_unido = " ".join(dicc_nuevo.values())
         similitud = difflib.SequenceMatcher(None, texto_base_unido, texto_nuevo_unido).ratio() * 100
@@ -143,7 +140,7 @@ if st.button("🚀 Ejecutar Barrido de Información"):
         st.metric(label="Porcentaje de Coincidencia Global", value=f"{similitud:.2f}%")
         
         if similitud == 100:
-            st.success("✅ ¡No se detectaron cambios! Toda la información coincide perfectamente por secciones.")
+            st.success("✅ ¡No se detectaron cambios! Toda la información coincide perfectamente.")
         else:
             st.warning("⚠️ Se detectaron discrepancias localizadas. Analizando cambios específicos:")
             
@@ -153,13 +150,11 @@ if st.button("🚀 Ejecutar Barrido de Información"):
                 en_base = numeral in dicc_base
                 en_nuevo = numeral in dicc_nuevo
                 
-                # Caso 1: El numeral existe en ambos (Comparación Directa e Inteligente)
                 if en_base and en_nuevo:
                     txt_b = dicc_base[numeral]
                     txt_n = dicc_nuevo[numeral]
                     
                     if txt_b != txt_n:
-                        # Resaltar sub-cambios internos (como literales A, B, C) de forma limpia
                         html_resultado.append(f"""
                         <div style='background-color: #fff9e6; padding: 12px; margin: 10px 0; border-left: 6px solid #ffcc00; border-radius: 4px; font-family: sans-serif;'>
                             <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Correspondiente: {numeral}</span>
@@ -168,7 +163,6 @@ if st.button("🚀 Ejecutar Barrido de Información"):
                         </div>
                         """)
                 
-                # Caso 2: El numeral estaba en tu base pero desapareció por completo en el nuevo
                 elif en_base and not en_nuevo:
                     html_resultado.append(f"""
                     <div style='background-color: #ffeeef; padding: 12px; margin: 10px 0; border-left: 6px solid #d32f2f; border-radius: 4px; font-family: sans-serif;'>
@@ -177,7 +171,6 @@ if st.button("🚀 Ejecutar Barrido de Información"):
                     </div>
                     """)
                 
-                # Caso 3: Es un numeral completamente nuevo (Inyección in-place) que antes no tenías
                 elif not en_base and en_nuevo:
                     html_resultado.append(f"""
                     <div style='background-color: #edf7ed; padding: 12px; margin: 10px 0; border-left: 6px solid #388e3c; border-radius: 4px; font-family: sans-serif;'>
@@ -186,9 +179,10 @@ if st.button("🚀 Ejecutar Barrido de Información"):
                     </div>
                     """)
             
+            # RENDERIZADO VISUAL SEGURO
             if html_resultado:
                 st.markdown("".join(html_resultado), unsafe_allow_html=True)
             else:
-                st.info("No hay cambios estructurales que mostrar en los numerales principales.")
+                st.info("No hay cambios que mostrar.")
     else:
         st.info("💡 Asegúrate de llenar el texto base y proveer la nueva fuente antes de ejecutar el barrido.")
