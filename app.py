@@ -4,25 +4,61 @@ import pdfplumber
 import difflib
 import urllib.request
 import io
+import re
 
 # Configuración de la página
 st.set_page_config(page_title="Auditor de Estándares", layout="wide")
 
 st.title("🔍 Auditor de Actualizaciones de Estándares")
-st.subheader("Detecta in-place updates emparejando el texto desactualizado con su versión nueva.")
+st.subheader("Detecta in-place updates respetando la estructura jerárquica de los estándares.")
 
-# --- FUNCIONES DE EXTRACCIÓN ---
+# --- FUNCIONES DE EXTRACCIÓN Y LIMPIEZA ---
+def segmentar_texto_estructurado(texto_crudo, etiqueta_origen=""):
+    """
+    Divide el texto usando los numerales (e.g., (12), (A), (B)) como guías 
+    para mantener la estructura jerárquica y evitar bloques masivos.
+    """
+    lineas_limpias = []
+    # Reemplazar múltiples espacios o barras raras que introduce el PDF
+    texto_filtrado = re.sub(r'\s+', ' ', texto_crudo).replace('//', ' ')
+    
+    # Expresión regular para detectar numerales como (12) o (A)
+    patron_seccion = r'(\(\d+\)|\([A-Za-z]\))'
+    
+    # Dividir el texto manteniendo el separador
+    partes = re.split(patron_seccion, texto_filtrado)
+    
+    ubicacion_actual = etiqueta_origen if etiqueta_origen else "[General]"
+    texto_acumulado = ""
+    
+    for parte in partes:
+        parte = parte.strip()
+        if not parte:
+            continue
+        
+        # Si la parte es un numeral o letra entre paréntesis, actualizamos el contexto
+        if re.match(patron_seccion, parte):
+            if texto_acumulado:
+                lineas_limpias.append(f"{ubicacion_actual}|||{texto_acumulado.strip()}")
+            ubicacion_actual = f"{etiqueta_origen} {parte}".strip()
+            texto_acumulado = parte + " "
+        else:
+            texto_acumulado += parte + " "
+            
+    if texto_acumulado:
+        lineas_limpias.append(f"{ubicacion_actual}|||{texto_acumulado.strip()}")
+        
+    return lineas_limpias
+
 def extraer_texto_pdf(stream):
-    texto_completo = []
+    lineas_totales = []
     with pdfplumber.open(stream) as pdf:
         for i, pagina in enumerate(pdf.pages):
             texto_pag = pagina.extract_text()
             if texto_pag:
-                for linea in texto_pag.split('\n'):
-                    if linea.strip():
-                        # Guardamos el texto junto con una etiqueta oculta de ubicación
-                        texto_completo.append(f"[Pág {i+1}]|||{linea.strip()}")
-    return texto_completo
+                # Segmentamos el texto de la página de forma estructurada
+                lineas_totales.extend(segmentar_texto_estructurado(texto_pag, f"[Pág {i+1}]"))
+    return lineas_totales
 
 def extraer_texto_excel(stream):
     texto_completo = []
@@ -42,8 +78,10 @@ with col1:
         height=350,
         placeholder="Copia y pega las líneas o párrafos que tienes registrados actualmente..."
     )
-    # Limpieza de líneas base
-    lineas_base = [linea.strip() for linea in texto_base_raw.split('\n') if linea.strip()]
+    # Procesamos también el texto pegado para estructurarlo bajo la misma lógica
+    lineas_base = []
+    if texto_base_raw.strip():
+        lineas_base = segmentar_texto_estructurado(texto_base_raw, "[Base de Datos]")
 
 with col2:
     st.header("2. Nueva Fuente a Comparar")
@@ -62,8 +100,7 @@ with col2:
             placeholder="Copia y pega el nuevo texto detectado aquí..."
         )
         if texto_nuevo_raw.strip():
-            # Para texto pegado, la ubicación es genérica u obtenida por línea
-            lineas_nuevas = [f"[Línea {i+1}]|||{linea.strip()}" for i, linea in enumerate(texto_nuevo_raw.split('\n')) if linea.strip()]
+            lineas_nuevas = segmentar_texto_estructurado(texto_nuevo_raw, "[Texto Pegado]")
             procesar_fuente = True
 
     elif metodo_entrada == "Enlace (URL) de un PDF":
@@ -92,7 +129,6 @@ with col2:
 if st.button("🚀 Ejecutar Barrido de Información"):
     if lineas_base and procesar_fuente and lineas_nuevas:
         
-        # Separar el texto limpio de las etiquetas de ubicación para calcular la similitud matemática
         limpias_base = [l.split("|||")[-1] for l in lineas_base]
         limpias_nuevas = [l.split("|||")[-1] for l in lineas_nuevas]
         
@@ -104,54 +140,51 @@ if st.button("🚀 Ejecutar Barrido de Información"):
         if similitud == 100:
             st.success("✅ ¡No se detectaron cambios! Toda la información coincide perfectamente.")
         else:
-            st.warning("⚠️ Se detectaron discrepancias consecutivas. Revisa el contraste abajo:")
+            st.warning("⚠️ Se detectaron discrepancias estructuradas. Revisa el contraste abajo:")
             st.write("### 🔍 Mapeo de Actualizaciones In-Place")
             
-            # Usamos SequenceMatcher para encontrar bloques cambiados correlativos
             sm = difflib.SequenceMatcher(None, limpias_base, limpias_nuevas)
             html_resultado = []
             
             for tag, i1, i2, j1, j2 in sm.get_opcodes():
-                # 'replace' significa que un bloque de texto antiguo fue reemplazado por uno nuevo
                 if tag == 'replace':
-                    # Extraer ubicaciones estimadas
-                    ubicacion_vieja = lineas_base[i1].split("|||")[0] if "|||" in lineas_base[i1] else f"[Línea {i1+1}]"
-                    ubicacion_nueva = lineas_nuevas[j1].split("|||")[0] if "|||" in lineas_nuevas[j1] else f"[Línea {j1+1}]"
-                    ubicacion = ubicacion_nueva if ubicacion_nueva != "[Línea 1]" else ubicacion_vieja
+                    ubicacion_vieja = lineas_base[i1].split("|||")[0]
+                    ubicacion_nueva = lineas_nuevas[j1].split("|||")[0]
+                    # Priorizar la ubicación que tenga más detalle (como el numeral o literal)
+                    ubicacion = ubicacion_nueva if "(" in ubicacion_nueva else ubicacion_vieja
                     
-                    txt_viejo = " // ".join(limpias_base[i1:i2])
-                    txt_nuevo = " // ".join(limpias_nuevas[j1:j2])
+                    txt_viejo = " <br> ".join(limpias_base[i1:i2])
+                    txt_nuevo = " <br> ".join(limpias_nuevas[j1:j2])
                     
                     html_resultado.append(f"""
-                    <div style='background-color: #fff9e6; padding: 10px; margin: 8px 0; border-left: 6px solid #ffcc00; border-radius: 4px;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; font-weight: bold;'>📍 {ubicacion}</span>
-                        <div style='margin-top: 5px; color: #cc0000;'><b>🛑 ANTES (Desactualizado):</b> <del>{txt_viejo}</del></div>
-                        <div style='margin-top: 2px; color: #2e7d32;'><b>🟢 AHORA (Actualizado):</b> {txt_nuevo}</div>
+                    <div style='background-color: #fff9e6; padding: 12px; margin: 10px 0; border-left: 6px solid #ffcc00; border-radius: 4px; font-family: monospace;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 {ubicacion}</span>
+                        <div style='margin-top: 8px; color: #cc0000;'><b>🛑 ANTES (Desactualizado):</b><br>{txt_viejo}</div>
+                        <div style='margin-top: 6px; color: #2e7d32;'><b>🟢 AHORA (Actualizado):</b><br>{txt_nuevo}</div>
                     </div>
                     """)
                 
-                # 'delete' significa que algo se borró por completo y no tiene contraparte nueva
                 elif tag == 'delete':
-                    ubicacion = lineas_base[i1].split("|||")[0] if "|||" in lineas_base[i1] else f"[Línea {i1+1}]"
-                    txt_del = " // ".join(limpias_base[i1:i2])
+                    ubicacion = lineas_base[i1].split("|||")[0]
+                    txt_del = " <br> ".join(limpias_base[i1:i2])
                     html_resultado.append(f"""
-                    <div style='background-color: #ffeeef; padding: 10px; margin: 8px 0; border-left: 6px solid #d32f2f; border-radius: 4px;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; font-weight: bold;'>📍 {ubicacion}</span>
-                        <div style='margin-top: 5px; color: #d32f2f;'><b>🗑️ ELIMINADO POR COMPLETO:</b> <del>{txt_del}</del></div>
+                    <div style='background-color: #ffeeef; padding: 12px; margin: 10px 0; border-left: 6px solid #d32f2f; border-radius: 4px; font-family: monospace;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 {ubicacion}</span>
+                        <div style='margin-top: 8px; color: #d32f2f;'><b>🗑️ ELIMINADO:</b><br><del>{txt_del}</del></div>
                     </div>
                     """)
                 
-                # 'insert' significa que es texto completamente nuevo inyectado en el archivo
                 elif tag == 'insert':
-                    ubicacion = lineas_nuevas[j1].split("|||")[0] if "|||" in lineas_nuevas[j1] else f"[Línea {j1+1}]"
-                    txt_ins = " // ".join(limpias_nuevas[j1:j2])
+                    ubicacion = lineas_nuevas[j1].split("|||")[0]
+                    txt_ins = " <br> ".join(limpias_nuevas[j1:j2])
                     html_resultado.append(f"""
-                    <div style='background-color: #edf7ed; padding: 10px; margin: 8px 0; border-left: 6px solid #388e3c; border-radius: 4px;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; font-weight: bold;'>📍 {ubicacion}</span>
-                        <div style='margin-top: 5px; color: #388e3c;'><b>✨ NUEVA ADICIÓN ENCONTRADA:</b> {txt_ins}</div>
+                    <div style='background-color: #edf7ed; padding: 12px; margin: 10px 0; border-left: 6px solid #388e3c; border-radius: 4px; font-family: monospace;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 {ubicacion}</span>
+                        <div style='margin-top: 8px; color: #388e3c;'><b>✨ NUEVA ADICIÓN:</b><br>{txt_ins}</div>
                     </div>
                     """)
             
             st.markdown("".join(html_resultado), unsafe_allow_html=True)
-    else:
+else:
+    if not lineas_base or not l_nuevas if 'l_nuevas' in locals() else True:
         st.info("💡 Asegúrate de llenar el texto base y proveer la nueva fuente antes de ejecutar el barrido.")
