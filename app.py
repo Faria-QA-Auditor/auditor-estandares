@@ -10,25 +10,22 @@ import re
 st.set_page_config(page_title="Auditor de Estándares", layout="wide")
 
 st.title("🔍 Auditor de Actualizaciones de Estándares")
-st.subheader("Detecta in-place updates respetando la estructura jerárquica de los estándares.")
+st.subheader("Mapeo estricto por numerales: Compara secciones equivalentes y detecta adiciones o eliminaciones.")
 
-# --- FUNCIONES DE EXTRACCIÓN Y LIMPIEZA ---
-def segmentar_texto_estructurado(texto_crudo, etiqueta_origen=""):
+# --- FUNCIONES DE EXTRACCIÓN Y MAPEO ---
+def mapear_por_numerales(texto_crudo, etiqueta_origen=""):
     """
-    Divide el texto usando los numerales (e.g., (12), (A), (B)) como guías 
-    para mantener la estructura jerárquica y evitar bloques masivos.
+    Extrae el texto y lo organiza en un diccionario indexado por su numeral principal (e.g., '(4)', '(12)').
+    Evita desalineaciones cruzadas entre numerales distintos.
     """
-    lineas_limpias = []
-    # Reemplazar múltiples espacios o barras raras que introduce el PDF
+    diccionario_secciones = {}
     texto_filtrado = re.sub(r'\s+', ' ', texto_crudo).replace('//', ' ')
     
-    # Expresión regular para detectar numerales como (12) o (A)
-    patron_seccion = r'(\(\d+\)|\([A-Za-z]\))'
+    # Captura numerales principales al inicio de un bloque (e.g., (4), (12))
+    patron_numeral_principal = r'(\(\d+\))'
+    partes = re.split(patron_numeral_principal, texto_filtrado)
     
-    # Dividir el texto manteniendo el separador
-    partes = re.split(patron_seccion, texto_filtrado)
-    
-    ubicacion_actual = etiqueta_origen if etiqueta_origen else "[General]"
+    numeral_actual = None
     texto_acumulado = ""
     
     for parte in partes:
@@ -36,37 +33,43 @@ def segmentar_texto_estructurado(texto_crudo, etiqueta_origen=""):
         if not parte:
             continue
         
-        # Si la parte es un numeral o letra entre paréntesis, actualizamos el contexto
-        if re.match(patron_seccion, parte):
-            if texto_acumulado:
-                lineas_limpias.append(f"{ubicacion_actual}|||{texto_acumulado.strip()}")
-            ubicacion_actual = f"{etiqueta_origen} {parte}".strip()
+        if re.match(patron_numeral_principal, parte):
+            if numeral_actual and texto_acumulado:
+                diccionario_secciones[numeral_actual] = texto_acumulado.strip()
+            numeral_actual = parte
             texto_acumulado = parte + " "
         else:
-            texto_acumulado += parte + " "
-            
-    if texto_acumulado:
-        lineas_limpias.append(f"{ubicacion_actual}|||{texto_acumulado.strip()}")
+            if numeral_actual:
+                texto_acumulado += parte + " "
+            else:
+                # Texto introductorio antes del primer numeral
+                diccionario_secciones[f"{etiqueta_origen} [Intro]"] = parte
+                
+    if numeral_actual and texto_acumulado:
+        diccionario_secciones[numeral_actual] = texto_acumulado.strip()
         
-    return lineas_limpias
+    return diccionario_secciones
 
 def extraer_texto_pdf(stream):
-    lineas_totales = []
+    texto_completo = []
     with pdfplumber.open(stream) as pdf:
-        for i, pagina in enumerate(pdf.pages):
+        for pagina in pdf.pages:
             texto_pag = pagina.extract_text()
             if texto_pag:
-                # Segmentamos el texto de la página de forma estructurada
-                lineas_totales.extend(segmentar_texto_estructurado(texto_pag, f"[Pág {i+1}]"))
-    return lineas_totales
+                texto_completo.append(texto_pag)
+    # Unimos todo el PDF para mapear los numerales globalmente a lo largo de las páginas
+    return mapear_por_numerales(" ".join(texto_completo), "[PDF]")
 
 def extraer_texto_excel(stream):
-    texto_completo = []
+    diccionario_secciones = {}
     df = pd.read_excel(stream)
     for index, fila in df.iterrows():
         fila_str = " | ".join([f"{col}: {val}" for col, val in fila.items() if pd.notna(val)])
-        texto_completo.append(f"[Fila {index+2}]|||{fila_str}")
-    return texto_completo
+        # Intentar extraer un numeral de la fila, si no, usar el número de fila
+        match = re.search(r'(\(\d+\))', fila_str)
+        clave = match.group(1) if match else f"[Fila {index+2}]"
+        diccionario_secciones[clave] = fila_str
+    return diccionario_secciones
 
 # --- INTERFAZ DE USUARIO ---
 col1, col2 = st.columns(2)
@@ -78,10 +81,9 @@ with col1:
         height=350,
         placeholder="Copia y pega las líneas o párrafos que tienes registrados actualmente..."
     )
-    # Procesamos también el texto pegado para estructurarlo bajo la misma lógica
-    lineas_base = []
+    dicc_base = {}
     if texto_base_raw.strip():
-        lineas_base = segmentar_texto_estructurado(texto_base_raw, "[Base de Datos]")
+        dicc_base = mapear_por_numerales(texto_base_raw, "[Base]")
 
 with col2:
     st.header("2. Nueva Fuente a Comparar")
@@ -90,7 +92,7 @@ with col2:
         ["Pegar Texto Directamente", "Enlace (URL) de un PDF", "Subir Archivo Local (PDF / Excel)"]
     )
     
-    lineas_nuevas = []
+    dicc_nuevo = {}
     procesar_fuente = False
 
     if metodo_entrada == "Pegar Texto Directamente":
@@ -100,7 +102,7 @@ with col2:
             placeholder="Copia y pega el nuevo texto detectado aquí..."
         )
         if texto_nuevo_raw.strip():
-            lineas_nuevas = segmentar_texto_estructurado(texto_nuevo_raw, "[Texto Pegado]")
+            dicc_nuevo = mapear_por_numerales(texto_nuevo_raw, "[Texto Pegado]")
             procesar_fuente = True
 
     elif metodo_entrada == "Enlace (URL) de un PDF":
@@ -110,7 +112,7 @@ with col2:
                 req = urllib.request.Request(url_input, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req) as response:
                     pdf_memory = io.BytesIO(response.read())
-                    lineas_nuevas = extraer_texto_pdf(pdf_memory)
+                    dicc_nuevo = extraer_texto_pdf(pdf_memory)
                     procesar_fuente = True
             except Exception as e:
                 st.error(f"❌ Error al acceder al PDF: {e}")
@@ -120,71 +122,73 @@ with col2:
         archivo_subido = st.file_uploader(f"Sube el archivo {tipo_archivo}", type=["pdf", "xlsx"])
         if archivo_subido:
             if tipo_archivo == "PDF":
-                lineas_nuevas = extraer_texto_pdf(archivo_subido)
+                dicc_nuevo = extraer_texto_pdf(archivo_subido)
             else:
-                lineas_nuevas = extraer_texto_excel(archivo_subido)
+                dicc_nuevo = extraer_texto_excel(archivo_subido)
             procesar_fuente = True
 
-# --- PROCESAMIENTO Y COMPARACIÓN ---
+# --- PROCESAMIENTO Y COMPARACIÓN EN PARALELO ---
 if st.button("🚀 Ejecutar Barrido de Información"):
-    if lineas_base and procesar_fuente and lineas_nuevas:
+    if dicc_base and procesar_fuente and dicc_nuevo:
         
-        limpias_base = [l.split("|||")[-1] for l in lineas_base]
-        limpias_nuevas = [l.split("|||")[-1] for l in lineas_nuevas]
+        # Consolidar todas las claves/numerales únicos identificados en ambas fuentes
+        todos_los_numerales = sorted(list(set(dicc_base.keys()) | set(dicc_nuevo.keys())), key=lambda x: len(x))
         
-        similitud = difflib.SequenceMatcher(None, " ".join(limpias_base), " ".join(limpias_nuevas)).ratio() * 100
+        # Calcular similitud global de los contenidos
+        texto_base_unido = " ".join(dicc_base.values())
+        texto_nuevo_unido = " ".join(dicc_nuevo.values())
+        similitud = difflib.SequenceMatcher(None, texto_base_unido, texto_nuevo_unido).ratio() * 100
         
         st.subheader("📊 Diagnóstico del Barrido")
         st.metric(label="Porcentaje de Coincidencia Global", value=f"{similitud:.2f}%")
         
         if similitud == 100:
-            st.success("✅ ¡No se detectaron cambios! Toda la información coincide perfectamente.")
+            st.success("✅ ¡No se detectaron cambios! Toda la información coincide perfectamente por secciones.")
         else:
-            st.warning("⚠️ Se detectaron discrepancias estructuradas. Revisa el contraste abajo:")
-            st.write("### 🔍 Mapeo de Actualizaciones In-Place")
+            st.warning("⚠️ Se detectaron discrepancias localizadas. Analizando cambios específicos:")
             
-            sm = difflib.SequenceMatcher(None, limpias_base, limpias_nuevas)
             html_resultado = []
             
-            for tag, i1, i2, j1, j2 in sm.get_opcodes():
-                if tag == 'replace':
-                    ubicacion_vieja = lineas_base[i1].split("|||")[0]
-                    ubicacion_nueva = lineas_nuevas[j1].split("|||")[0]
-                    # Priorizar la ubicación que tenga más detalle (como el numeral o literal)
-                    ubicacion = ubicacion_nueva if "(" in ubicacion_nueva else ubicacion_vieja
+            for numeral in todos_los_numerales:
+                en_base = numeral in dicc_base
+                en_nuevo = numeral in dicc_nuevo
+                
+                # Caso 1: El numeral existe en ambos (Comparación Directa e Inteligente)
+                if en_base and en_nuevo:
+                    txt_b = dicc_base[numeral]
+                    txt_n = dicc_nuevo[numeral]
                     
-                    txt_viejo = " <br> ".join(limpias_base[i1:i2])
-                    txt_nuevo = " <br> ".join(limpias_nuevas[j1:j2])
-                    
+                    if txt_b != txt_n:
+                        # Resaltar sub-cambios internos (como literales A, B, C) de forma limpia
+                        html_resultado.append(f"""
+                        <div style='background-color: #fff9e6; padding: 12px; margin: 10px 0; border-left: 6px solid #ffcc00; border-radius: 4px; font-family: sans-serif;'>
+                            <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Correspondiente: {numeral}</span>
+                            <div style='margin-top: 8px; color: #cc0000;'><b>🛑 ANTES (Desactualizado):</b><br>{txt_b}</div>
+                            <div style='margin-top: 6px; color: #2e7d32;'><b>🟢 AHORA (Actualizado):</b><br>{txt_n}</div>
+                        </div>
+                        """)
+                
+                # Caso 2: El numeral estaba en tu base pero desapareció por completo en el nuevo
+                elif en_base and not en_nuevo:
                     html_resultado.append(f"""
-                    <div style='background-color: #fff9e6; padding: 12px; margin: 10px 0; border-left: 6px solid #ffcc00; border-radius: 4px; font-family: monospace;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 {ubicacion}</span>
-                        <div style='margin-top: 8px; color: #cc0000;'><b>🛑 ANTES (Desactualizado):</b><br>{txt_viejo}</div>
-                        <div style='margin-top: 6px; color: #2e7d32;'><b>🟢 AHORA (Actualizado):</b><br>{txt_nuevo}</div>
+                    <div style='background-color: #ffeeef; padding: 12px; margin: 10px 0; border-left: 6px solid #d32f2f; border-radius: 4px; font-family: sans-serif;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Eliminado: {numeral}</span>
+                        <div style='margin-top: 8px; color: #d32f2f;'><b>🗑️ REMOVIDO COMPLETAMENTE DE LA FUENTE NUEVA:</b><br>{dicc_base[numeral]}</div>
                     </div>
                     """)
                 
-                elif tag == 'delete':
-                    ubicacion = lineas_base[i1].split("|||")[0]
-                    txt_del = " <br> ".join(limpias_base[i1:i2])
+                # Caso 3: Es un numeral completamente nuevo (Inyección in-place) que antes no tenías
+                elif not en_base and en_nuevo:
                     html_resultado.append(f"""
-                    <div style='background-color: #ffeeef; padding: 12px; margin: 10px 0; border-left: 6px solid #d32f2f; border-radius: 4px; font-family: monospace;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 {ubicacion}</span>
-                        <div style='margin-top: 8px; color: #d32f2f;'><b>🗑️ ELIMINADO:</b><br><del>{txt_del}</del></div>
-                    </div>
-                    """)
-                
-                elif tag == 'insert':
-                    ubicacion = lineas_nuevas[j1].split("|||")[0]
-                    txt_ins = " <br> ".join(limpias_nuevas[j1:j2])
-                    html_resultado.append(f"""
-                    <div style='background-color: #edf7ed; padding: 12px; margin: 10px 0; border-left: 6px solid #388e3c; border-radius: 4px; font-family: monospace;'>
-                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 {ubicacion}</span>
-                        <div style='margin-top: 8px; color: #388e3c;'><b>✨ NUEVA ADICIÓN:</b><br>{txt_ins}</div>
+                    <div style='background-color: #edf7ed; padding: 12px; margin: 10px 0; border-left: 6px solid #388e3c; border-radius: 4px; font-family: sans-serif;'>
+                        <span style='background-color: #e6f2ff; color: #0044cc; padding: 3px 8px; border-radius: 3px; font-size: 0.9em; font-weight: bold;'>📍 Numeral Nuevo Detectado: {numeral}</span>
+                        <div style='margin-top: 8px; color: #388e3c;'><b>✨ NUEVA SECCIÓN ADICIONADA:</b><br>{dicc_nuevo[numeral]}</div>
                     </div>
                     """)
             
-            st.markdown("".join(html_resultado), unsafe_allow_html=True)
-else:
-    if not lineas_base or not l_nuevas if 'l_nuevas' in locals() else True:
+            if html_resultado:
+                st.markdown("".join(html_resultado), unsafe_allow_html=True)
+            else:
+                st.info("No hay cambios estructurales que mostrar en los numerales principales.")
+    else:
         st.info("💡 Asegúrate de llenar el texto base y proveer la nueva fuente antes de ejecutar el barrido.")
